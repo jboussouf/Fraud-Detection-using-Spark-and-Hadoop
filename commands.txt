@@ -1,0 +1,210 @@
+
+- docker exec -it hadoop-master bash
+
+-./start-hadoop.sh
+
+-./start-kafka-zookeeper.sh
+
+
+------------------------------------------Bloc SIZE--------------------------------------------------
+hadoop fs -D dfs.block.size=64M -D dfs.replication=2 -put /home/dataset_2.csv /data/
+
+hdfs dfsadmin -report
+
+------------------------------------------SPARK SHELL------------------------------------------------
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
+import org.apache.spark.mllib.evaluation.BinaryClassificationMetrics
+import org.apache.spark.sql.types._
+import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.classification.LogisticRegression
+import org.apache.spark.mllib.evaluation.MultilabelMetrics
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+import org.apache.spark.ml.feature.StringIndexer
+import org.apache.spark.sql.functions.{sum, col}
+
+val spark = SparkSession.builder().appName("Creating DataFrame").master("local[*]").getOrCreate()
+import spark.implicits._
+
+val df = spark.read.option("header", "true").csv("/data/dataset.csv")
+val df2 = df.withColumn("step",col("step").cast("double"))
+val df3 = df2.withColumn("amount",col("amount").cast("double"))
+val df4 = df3.withColumn("oldbalanceOrg",col("oldbalanceOrg").cast("double"))
+val df5 = df4.withColumn("newbalanceOrig",col("newbalanceOrig").cast("double"))
+val df6 = df5.withColumn("oldbalanceDest",col("oldbalanceDest").cast("double"))
+val df7 = df6.withColumn("newbalanceDest",col("newbalanceDest").cast("double"))
+val df8 = df7.withColumn("isFraud",col("isFraud").cast("double"))
+val df9 = df8.withColumn("isFlaggedFraud",col("isFlaggedFraud").cast("double"))
+df.show()
+
+//df.describe().show(false)
+
+//df.select(df("nameOrig")).distinct.describe().show(false)
+downsampledDF.select(downsampledDF("isFraud")).distinct.describe().show(false)
+
+//df.select(df("nameDest")).distinct.describe().show(false)
+
+val indexer = new StringIndexer().setInputCol("type").setOutputCol("typeCategorical").fit(df9)
+
+val indexed = indexer.transform(df9)
+
+val df_transformed = indexed.drop("type").drop("nameOrig").drop("nameDest")
+
+df_transformed.select(df_transformed.columns.map(c => sum(col(c).isNull.cast("int")).alias(c)): _*).show
+
+df_transformed.printSchema()
+
+val featureCols = Array("step", "amount", "oldbalanceOrg", "newbalanceOrig", "oldbalanceDest", "newbalanceDest", "isFlaggedFraud", "typeCategorical")
+
+val assembler = new VectorAssembler().setInputCols(featureCols).setOutputCol("features")
+
+val final_df = assembler.transform(df_transformed)
+
+final_df.printSchema()
+
+val Array(training, test) = final_df.randomSplit(Array(0.8, 0.2))
+
+val training2 = training.withColumnRenamed("isFraud", "label")
+
+val test2 = test.withColumnRenamed("isFraud", "label")
+
+val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
+
+val model = lr.fit(training2)
+
+val predictions = model.transform(test2)
+
+val trainingSummary = model.summary
+
+val objectiveHistory = trainingSummary.objectiveHistory
+
+objectiveHistory.foreach(println)
+
+val binarySummary = trainingSummary.asInstanceOf[BinaryLogisticRegressionSummary]
+
+val roc = binarySummary.roc
+
+roc.show
+
+val evaluator = new BinaryClassificationEvaluator().setLabelCol("label")
+
+val accuracy = evaluator.evaluate(predictions)
+
+val predictionAndLabels = test.map { case LabeledPoint(label, features) =>  val prediction = model.predict(features)  (prediction, label)}
+
+val precision = metrics.precisionByThreshold
+
+precision.collect.foreach { case (t, p) => println(s"Threshold: $t, Precision: $p")}
+
+val model = new LogisticRegressionWithLBFGS().setNumClasses(2).run(training)
+
+-------------------------------------- SPARK SHELL TXT -------------------------------------------
+
+val df = spark.read.text("/data/dataset.txt")
+import org.apache.spark.sql.SparkSession
+val spark = SparkSession.builder().appName("Creating DataFrame").master("local[*]").getOrCreate()
+
+
+
+val df = spark.read.option("header", "true").csv("/data/dataset_2.csv")
+
+val colNames=Array("Surname","CreditScore", "Age", "Tenure","Balance","NumOfProducts","HasCrCard","IsActiveMember","EstimatedSalary","Exited","Surname_tfidf_0","Surname_tfidf_1","Surname_tfidf_2","Surname_tfidf_3","Surname_tfidf_4","France","Germany","Spain","Female","Male","Mem__no__Products","Cred_Bal_Sal","Bal_sal","Tenure_Age","Age_Tenure_product")
+
+
+val dataType: Map[String, DataType] = Map("Surname" -> DoubleType, "CreditScore" -> DoubleType,  "Age" -> DoubleType,  "Tenure" -> DoubleType,  "Balance" -> DoubleType,  "NumOfProducts" -> DoubleType,  "HasCrCard" -> DoubleType,  "IsActiveMember" -> DoubleType,  "EstimatedSalary" -> DoubleType,  "Exited" -> DoubleType,  "Surname_tfidf_0" -> DoubleType,  "Surname_tfidf_1" -> DoubleType,  "Surname_tfidf_2" -> DoubleType,  "Surname_tfidf_3" -> DoubleType,  "Surname_tfidf_4" -> DoubleType,  "France" -> DoubleType,  "Germany" -> DoubleType,  "Spain" -> DoubleType,  "Female" -> DoubleType,  "Male" -> DoubleType,  "Mem__no__Products" -> DoubleType,  "Cred_Bal_Sal" -> DoubleType,  "Bal_sal" -> DoubleType,  "Tenure_Age" -> DoubleType,  "Age_Tenure_product" -> DoubleType)
+
+val result = df.columns.foldLeft(df) { (newDF, colName) => newDF.withColumn(colName, newDF(colName).cast(dataType(colName)))}
+
+val featureCols = Array("Surname", "CreditScore", "Age", "Tenure", "Balance", "NumOfProducts", "HasCrCard", "EstimatedSalary", "Exited", "Surname_tfidf_0", "Surname_tfidf_1", "Surname_tfidf_2", "Surname_tfidf_3", "Surname_tfidf_4", "France", "Spain", "Female", "Male", "Mem__no__Products", "Cred_Bal_Sal", "Bal_sal", "Tenure_Age", "Age_Tenure_product")
+
+
+val assembler = new VectorAssembler().setInputCols(featureCols).setOutputCol("features")
+
+val final_df = assembler.transform(result)
+
+val Array(training, test) = final_df.randomSplit(Array(0.8, 0.2))
+
+val training2 = training.withColumnRenamed("isActiveMember", "label")
+
+val test2 = test.withColumnRenamed("isActiveMember", "label")
+
+val lr = new LogisticRegression().setMaxIter(10).setRegParam(0.3).setElasticNetParam(0.8)
+
+val model = lr.fit(training2)
+
+val predictions = model.transform(test2)
+
+val predictionAndLabels = predictions.select("prediction", "label").as[(Double,Double)].rdd
+
+val metricsBinary = new BinaryClassificationMetrics(predictionAndLabels)
+
+val metricsMulti = new MulticlassMetrics(predictionAndLabels)
+
+metricsMulti.confusionMatrix
+
+case class Bank(
+    Surname: String,
+    CreditScore: String,
+    Age: String,
+    Tenure: String,
+    Balance: String,
+    NumOfProducts: String,
+    HasCrCard: String,
+    EstimatedSalary: String,
+    Exited: String,
+    Surname_tfidf_0: String,
+    Surname_tfidf_1: String,
+    Surname_tfidf_2: String,
+    Surname_tfidf_3: String,
+    Surname_tfidf_4: String,
+    France: String,
+    Spain: String,
+    Female: String,
+    Male: String,
+    Mem__no__Products: String,
+    Cred_Bal_Sal: String,
+    Bal_sal: String,
+    Tenure_Age: String,
+    Age_Tenure_product: String
+)
+
+
+val ds = spark.read.option("header", "true").csv("/data/dataset_2.csv").as[Bank]
+
+
+-------------------------------------- DOWNSAMPLING ------------------------------------------------
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.functions._
+
+// Assuming your DataFrame is named df
+val dfWithOne = final_df.filter("isFraud = 1")
+val dfWithZero = final_df.filter("isFraud = 0")
+
+// Get the count of the smaller group
+val smallerCount = dfWithOne.count()
+
+// Sample from the larger group to match the count of the smaller group
+val sampledDF = dfWithZero.sample(false, smallerCount.toDouble / dfWithZero.count())
+
+// Combine the sampled DataFrame with the DataFrame of zeros
+val downsampledDF = sampledDF.union(dfWithOne)
+
+val Array(training_down, test_down) = downsampledDF.randomSplit(Array(0.8, 0.2))
+
+val training_down2 = training_down.withColumnRenamed("isFraud", "label")
+
+val test_down2 = test_down.withColumnRenamed("isFraud", "label")
+
+val lr = new LogisticRegression().setMaxIter(250)
+
+val model = lr.fit(training_down2)
+
+val predictions = model.transform(test_down2)
+
+val predictionAndLabels = predictions.select("prediction", "label").as[(Double,Double)].rdd
+
+val metricsBinary = new BinaryClassificationMetrics(predictionAndLabels)
+
+val metricsMulti = new MulticlassMetrics(predictionAndLabels)
+
+metricsMulti.confusionMatrix
